@@ -24,6 +24,11 @@ LOG_PREFIX_REGEX = re.compile(
     r"\s+iOSTestbed\[\d+:\w+\] "  # Process/thread ID
 )
 
+# Matches the partial-line marker (Randomly selected Unicode PUA (U+EE1F))
+# appended by Lib/_apple_support.py to log messages that did not end with
+# a newline, followed by the log-appended newline. Removing both causes the
+# next write to continue on the same line rather than starting a new one.
+LOG_PARTIAL_LINE_REGEX = re.compile("\uEE1F\n$")
 
 # Select a simulator device to use.
 def select_simulator_device(platform):
@@ -99,6 +104,12 @@ def xcode_test(location: Path, platform: str, simulator: str, verbose: bool):
     while line := (process.stdout.readline()).decode(*DECODE_ARGS):
         # Strip the timestamp/process prefix from each log line
         line = LOG_PREFIX_REGEX.sub("", line)
+
+        # A marker immediately before the message's trailing newline means the
+        # writer did not emit a newline: it is a partial line that should be
+        # joined with the following message rather than shown on its own line.
+        line = LOG_PARTIAL_LINE_REGEX.sub("", line)
+
         sys.stdout.write(line)
         sys.stdout.flush()
 
