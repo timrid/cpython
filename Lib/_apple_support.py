@@ -47,6 +47,7 @@ class LogStream(io.RawIOBase):
     def __init__(self, log_write, level):
         self.log_write = log_write
         self.level = level
+        self._pending = b""
 
     def __repr__(self):
         return f"<LogStream (level {self.level!r})>"
@@ -67,13 +68,21 @@ class LogStream(io.RawIOBase):
         if b:
             # Encode null bytes using "modified UTF-8" to avoid truncating the
             # message.
-            data = b.replace(b"\x00", b"\xc0\x80")
+            self._pending += b.replace(b"\x00", b"\xc0\x80")
 
-            # Append a marker to partial lines (see PARTIAL_LINE_MARKER).
-            if not b.endswith(b"\n"):
-                data += self.PARTIAL_LINE_MARKER
-            self.log_write(self.level, data)
+            # Complete line: emit immediately without a marker.
+            if b.endswith(b"\n"):
+                self.log_write(self.level, self._pending)
+                self._pending = b""
 
         # Modifications of the changed data should not affect the return value, as
         # the caller may be expecting it to match the length of the input.
         return len(b)
+
+    def flush(self):
+        # Emit any buffered partial line with a marker (see PARTIAL_LINE_MARKER)
+        # so a cooperating log reader can re-join it with the next message.
+        if self._pending:
+            self.log_write(self.level, self._pending + self.PARTIAL_LINE_MARKER)
+            self._pending = b""
+        super().flush()
